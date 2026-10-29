@@ -2,7 +2,7 @@
 <html lang="en" class="pwa">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>P&amp;L Lens</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -55,6 +55,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font);
@@ -232,6 +233,26 @@ ol.steps { margin: 6px 0 0; padding-left: 20px; color: var(--ink-2); font-size: 
 table.bd td:first-child { min-width: 0; }
 td .spark { margin: 0; height: 22px; }
 td .detail { font-weight: 500; }
+
+/* companies */
+.ent-sel { max-width: min(52vw, 280px); text-overflow: ellipsis; }
+@media (max-width: 899px) { .brand-name { display: none; } .top-row .ent-sel { flex: 1; max-width: none; } .top-row .spacer { display: none; } }
+details.ent { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+details.ent:first-of-type { border-top: 0; padding-top: 4px; }
+details.ent summary { list-style-position: outside; }
+.txt { border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 8px 10px; font-size: 16px; width: 100%; }
+textarea { font-size: 16px; }
+.sheet { position: fixed; inset: 0; z-index: 60; background: rgba(10, 14, 20, 0.5); display: grid; align-items: end; justify-items: center; padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+@media (min-width: 700px) { .sheet { align-items: center; } }
+.sheet-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px; width: 100%; max-width: 460px; display: grid; gap: 14px; max-height: 88vh; overflow: auto; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); }
+.sheet-card h2 { margin: 0; font-size: 17px; }
+.opts { display: grid; gap: 8px; }
+.opt { display: flex; gap: 10px; align-items: flex-start; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.opt input[type="radio"] { margin-top: 3px; accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+.opt > span { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.opt small { color: var(--ink-3); font-size: 12.5px; }
+.warnbox { border-radius: 10px; padding: 10px 12px; background: color-mix(in srgb, var(--bad) 12%, transparent); font-size: 13.5px; line-height: 1.45; }
 </style>
 </head>
 <body>
@@ -240,8 +261,9 @@ td .detail { font-weight: 500; }
     <div class="top-row">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 13V8M8 13V3M13 13v-6"/></svg></span>
-        <span>P&amp;L Lens</span>
+        <span class="brand-name">P&amp;L Lens</span>
       </div>
+      <select class="sel ent-sel" id="entSel" aria-label="Company" hidden></select>
       <span class="spacer"></span>
       <nav class="nav" id="nav" aria-label="Sections">
         <button data-tab="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span>Overview</span></button>
@@ -257,6 +279,7 @@ td .detail { font-weight: 500; }
 <main class="wrap" id="main"></main>
 <input type="file" id="fileInput" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
 <input type="file" id="restoreInput" accept=".json,application/json" hidden>
+<div id="sheet" class="sheet" hidden></div>
 <div id="toast" class="toast" role="status" hidden></div>
 
 <script>/* SheetJS Community Edition 0.18.5, Apache-2.0 */
@@ -546,11 +569,32 @@ function nice(name) {
 }
 
 /* ---------------- state ---------------- */
-let DB = { v: 1, periods: {}, aliases: {}, notes: {}, settings: { fyStart: 1, decimals: false } };
+const freshDB = () => ({ v: 2, entities: {}, order: [], aliases: {}, notes: {}, fileMap: {}, settings: { fyStart: 1, decimals: false } });
+let DB = freshDB();
 let M = null;
-const UI = Object.assign({ tab: 'overview', basis: 'month', end: null, from: null, cmp: 'prev', bFrom: null, bTo: null, avg: false, drill: null, pnlView: 'compare', hideZero: true, trends: null, trendMode: 'rm', drillAll: false }, LS.get('ui', {}));
+function migrate(d) {
+  if (!d) return freshDB();
+  if (d.v === 2 && d.entities) return Object.assign(freshDB(), d, { settings: Object.assign({ fyStart: 1, decimals: false }, d.settings || {}) });
+  const out = freshDB();
+  if (d.periods && Object.keys(d.periods).length) {
+    const demo = Object.values(d.periods).some(p => p.demo);
+    out.entities.e1 = { name: demo ? 'Demo company' : 'Company 1', periods: d.periods, demo };
+    out.order = ['e1'];
+  }
+  out.aliases = d.aliases || {};
+  Object.assign(out.settings, d.settings || {});
+  for (const k in d.notes || {}) out.notes['e1::' + k] = d.notes[k];
+  return out;
+}
+const ents = () => DB.order.filter(id => DB.entities[id]);
+function curIds() { const e = ents(); if (UI.entity === 'all' && e.length > 1) return e; if (DB.entities[UI.entity]) return [UI.entity]; return e.slice(0, 1); }
+const scopeId = () => { const c = curIds(); return c.length > 1 ? 'all' : c[0] || 'none'; };
+const entName = id => (DB.entities[id] ? DB.entities[id].name : '');
+const shortName = id => entName(id).replace(/[\s,]+(sdn\.?\s*bhd\.?|bhd\.?|berhad|plc|ltd\.?|limited|pte\.?\s*ltd\.?|llc|inc\.?)$/i, '').trim() || entName(id);
+const noteKey = (key, m) => `${scopeId()}::${key}@${m}`;
+const UI = Object.assign({ entity: null, tab: 'overview', basis: 'month', end: null, from: null, cmp: 'prev', bFrom: null, bTo: null, avg: false, drill: null, pnlView: 'compare', hideZero: true, trends: null, trendMode: 'rm', drillAll: false }, LS.get('ui', {}));
 let lastImport = null;
-const saveUI = () => LS.set('ui', { basis: UI.basis, cmp: UI.cmp, avg: UI.avg, pnlView: UI.pnlView, hideZero: UI.hideZero, trends: UI.trends, trendMode: UI.trendMode });
+const saveUI = () => LS.set('ui', { entity: UI.entity, basis: UI.basis, cmp: UI.cmp, avg: UI.avg, pnlView: UI.pnlView, hideZero: UI.hideZero, trends: UI.trends, trendMode: UI.trendMode });
 async function save() {
   const ok = await Store.set('db', DB);
   if (!ok) toast('Could not save on this device. Data will last until you close the app.');
@@ -568,56 +612,74 @@ function canon(name) { let n = name, i = 0; while (DB.aliases[n] && i++ < 10) n 
 const personKey = s => String(s).toUpperCase().replace(/\s+/g, ' ').trim();
 
 function buildModel() {
-  const months = Object.keys(DB.periods).sort();
+  const ids = curIds(), multi = ids.length > 1;
+  const per = (id, m) => DB.entities[id].periods[m];
+  const mset = new Set(); ids.forEach(id => Object.keys(DB.entities[id].periods).forEach(m => mset.add(m)));
+  const months = [...mset].sort();
   const idx = {}; months.forEach((m, i) => (idx[m] = i));
   const items = new Map();
   const order = { rev: [], cogs: [], oinc: [], opex: [] };
   const values = months.map(() => ({}));
+  const valuesE = {}; ids.forEach(id => (valuesE[id] = months.map(() => ({}))));
   const metrics = months.map(() => ({ rev: 0, cogs: 0, gp: 0, oinc: 0, opex: 0, np: 0 }));
   for (let i = months.length - 1; i >= 0; i--) {
-    const p = DB.periods[months[i]];
-    for (const s of p.sections) {
-      const type = TYPES.includes(s.type) ? s.type : 'opex';
-      for (const it of s.items) {
-        const name = canon(it.name);
-        const key = type + '|' + name;
-        if (!items.has(key)) { items.set(key, { key, type, name, raws: new Set(), periods: new Set(), detail: '' }); order[type].push(key); }
-        const o = items.get(key);
-        o.raws.add(it.name); o.periods.add(months[i]);
-        if (it.detail && !o.detail) o.detail = it.detail;
-        values[i][key] = (values[i][key] || 0) + it.amount;
+    for (const id of ids) {
+      const p = per(id, months[i]); if (!p) continue;
+      for (const s of p.sections) {
+        const type = TYPES.includes(s.type) ? s.type : 'opex';
+        for (const it of s.items) {
+          const name = canon(it.name);
+          const key = type + '|' + name;
+          if (!items.has(key)) { items.set(key, { key, type, name, raws: new Set(), periods: new Set(), detail: '' }); order[type].push(key); }
+          const o = items.get(key);
+          o.raws.add(it.name); o.periods.add(months[i]);
+          if (it.detail && !o.detail) o.detail = it.detail;
+          values[i][key] = (values[i][key] || 0) + it.amount;
+          valuesE[id][i][key] = (valuesE[id][i][key] || 0) + it.amount;
+        }
       }
     }
   }
+  const cover = months.map(m => ids.filter(id => per(id, m)));
   months.forEach((m, i) => {
     const v = values[i], mt = metrics[i];
     for (const k in v) mt[items.get(k).type] += v[k];
     mt.gp = mt.rev - mt.cogs;
     mt.np = mt.gp + mt.oinc - mt.opex;
-    const rep = DB.periods[m].reported || {};
-    mt.check = rep.np == null ? null : rep.np - mt.np;
+    let rep = 0, ok = true;
+    for (const id of cover[i]) { const r = per(id, m).reported || {}; if (r.np == null) ok = false; else rep += r.np; }
+    mt.check = ok ? rep - mt.np : null;
   });
   const links = months.map(() => ({}));
   const unlinked = months.map(() => []);
   months.forEach((m, i) => {
-    for (const sch of DB.periods[m].schedules || []) {
-      sch.columns.forEach((col, j) => {
-        if (sch.columns.length > 1 && /^TOTAL/.test(col)) return;
-        const total = sch.totals[j];
-        let best = null, bestScore = 0;
-        for (const k in values[i]) {
-          const amt = values[i][k];
-          const totalMatch = Math.abs(amt - total) <= 0.5 && Math.abs(amt) > 0.004;
-          const nameMatch = sch.kind === 'single' && canon(P.normName(sch.title)) === items.get(k).name;
-          const score = (totalMatch ? 2 : 0) + (nameMatch ? 1 : 0);
-          if (score > bestScore && (totalMatch || nameMatch)) { best = k; bestScore = score; }
-        }
-        const meas = { title: sch.kind === 'single' ? sch.title : `${sch.title} · ${col}`, label: sch.period, rows: sch.rows.map(r => ({ name: r.name, value: r.values[j] })), total, matched: bestScore >= 2 };
-        if (best && !links[i][best]) links[i][best] = meas; else unlinked[i].push(meas);
-      });
+    for (const id of cover[i]) {
+      const vals = valuesE[id][i], claimed = new Set();
+      for (const sch of per(id, m).schedules || []) {
+        sch.columns.forEach((col, j) => {
+          if (sch.columns.length > 1 && /^TOTAL/.test(col)) return;
+          const total = sch.totals[j];
+          let best = null, bestScore = 0;
+          for (const k in vals) {
+            const amt = vals[k];
+            const totalMatch = Math.abs(amt - total) <= 0.5 && Math.abs(amt) > 0.004;
+            const nameMatch = sch.kind === 'single' && canon(P.normName(sch.title)) === items.get(k).name;
+            const score = (totalMatch ? 2 : 0) + (nameMatch ? 1 : 0);
+            if (score > bestScore && (totalMatch || nameMatch)) { best = k; bestScore = score; }
+          }
+          const pre = multi ? shortName(id) + ' · ' : '';
+          const meas = { title: sch.kind === 'single' ? sch.title : `${sch.title} · ${col}`, label: sch.period, rows: sch.rows.map(r => ({ name: pre + r.name, value: r.values[j] })), total, matched: bestScore >= 2 };
+          if (best && !claimed.has(best)) {
+            claimed.add(best);
+            const ex = links[i][best];
+            if (ex) { ex.rows = ex.rows.concat(meas.rows); ex.total += total; ex.matched = ex.matched && meas.matched; }
+            else links[i][best] = meas;
+          } else unlinked[i].push(meas);
+        });
+      }
     }
   });
-  M = { months, idx, items, order, values, metrics, links, unlinked };
+  M = { months, idx, items, order, values, metrics, links, unlinked, ids, multi, cover };
 }
 
 /* ---------------- ranges ---------------- */
@@ -800,7 +862,15 @@ function setTab(tab) {
 }
 function goDrill(key) { UI.drill = key; UI.drillAll = false; setTab('drill'); }
 
+function renderEntSel() {
+  const el = $('#entSel'), e = ents();
+  if (!e.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = e.map(id => `<option value="${id}">${esc(entName(id))}</option>`).join('') + (e.length > 1 ? `<option value="all">Combined (all ${e.length})</option>` : '');
+  el.value = scopeId() === 'all' ? 'all' : curIds()[0];
+}
 function render() {
+  renderEntSel();
   $$('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === UI.tab ? 'page' : 'false'));
   const main = $('#main');
   if (!M.months.length && UI.tab !== 'data') { $('#pbar').innerHTML = ''; main.innerHTML = emptyState(); bindEmpty(); return; }
@@ -840,6 +910,7 @@ function renderPbar(R) {
   if (A.loaded < A.n) notes.push(`${A.loaded} of ${A.n} months loaded`);
   if (B && B.empty) notes.push('no data loaded for the comparison period');
   else if (B && B.loaded < B.n) notes.push(`comparison has ${B.loaded} of ${B.n} months`);
+  if (M.multi) { const miss = A.months.filter(m => M.idx[m] != null && M.cover[M.idx[m]].length < M.ids.length); if (miss.length) notes.push(`combined figures are missing a company in ${miss.map(mLabel).join(', ')}`); }
   if (B && A.n !== B.n && !UI.avg) notes.push('periods differ in length; tick Monthly average for a fair comparison');
   h += `<div class="pbar-note">${notes.join(' · ')}</div>`;
   el.innerHTML = h;
@@ -1066,12 +1137,12 @@ function renderDrill(main, R) {
     const sib = unlinkedFor(A);
     h += `<section class="card"><h2>Breakdown</h2><p class="help" style="margin-top:6px">The file has no supporting schedule for this line, so the detail stops here. Add a note below with the reason (one-off event, price change, timing) so you remember next time.${sib ? ` ${sib}` : ''}</p></section>`;
   }
-  if (!inf.metric) h += `<section class="card"><h2>Your note for ${esc(mLabel(UI.end))}</h2><p class="sub" style="margin-bottom:8px">Saved on this device</p><textarea id="note" placeholder="e.g. Raya campaign, paid two months of ads in one go">${esc(DB.notes[key + '@' + UI.end] || '')}</textarea>${otherNotes(key)}</section>`;
+  if (!inf.metric) h += `<section class="card"><h2>Your note for ${esc(mLabel(UI.end))}</h2><p class="sub" style="margin-bottom:8px">Saved on this device</p><textarea id="note" placeholder="e.g. Raya campaign, paid two months of ads in one go">${esc(DB.notes[noteKey(key, UI.end)] || '')}</textarea>${otherNotes(key)}</section>`;
   main.innerHTML = h;
   bindActs(main);
   $('#drillSel').onchange = e => { UI.drill = e.target.value; UI.drillAll = false; render(); };
   const note = $('#note');
-  if (note) note.oninput = () => { clearTimeout(note._t); note._t = setTimeout(() => { const k = key + '@' + UI.end; if (note.value.trim()) DB.notes[k] = note.value; else delete DB.notes[k]; save(); }, 400); };
+  if (note) note.oninput = () => { clearTimeout(note._t); note._t = setTimeout(() => { const k = noteKey(key, UI.end); if (note.value.trim()) DB.notes[k] = note.value; else delete DB.notes[k]; save(); }, 400); };
   const ms = M.months, vals = seriesAll(key);
   colChart($('#chDrill'), { labels: ms.map(mShort), tipLabels: ms.map(mLabel), name: inf.name, values: vals, aria: inf.name + ' by month',
     colors: vals.map((_, i) => (inR(A, i) ? 'var(--s1)' : inR(B, i) ? 'var(--bar-base)' : 'var(--bar-dim)')),
@@ -1084,7 +1155,8 @@ function unlinkedFor(A) {
   return s.size ? `Schedules in the file that did not match any line: ${[...s].map(esc).join('; ')}.` : '';
 }
 function otherNotes(key) {
-  const list = Object.keys(DB.notes).filter(k => k.startsWith(key + '@') && k !== key + '@' + UI.end).sort().reverse();
+  const pre = `${scopeId()}::${key}@`;
+  const list = Object.keys(DB.notes).filter(k => k.startsWith(pre) && k !== noteKey(key, UI.end)).sort().reverse();
   if (!list.length) return '';
   return `<div style="margin-top:12px;display:grid;gap:6px">${list.map(k => `<div class="tile-s"><b style="color:var(--ink-2)">${mLabel(k.split('@')[1])}:</b> ${esc(DB.notes[k])}</div>`).join('')}</div>`;
 }
@@ -1217,8 +1289,12 @@ function renderData(main) {
   h += `<section class="card"><div class="card-head"><div><h2>Import</h2><p class="sub">Each month, import the new file from your accountant. Months already here are replaced with the newer figures.</p></div></div>
     <div class="drop" id="drop"><button class="btn primary" data-act="import">Choose P&amp;L file (.xls / .xlsx)</button><p class="help">On iPhone: save the email attachment to Files first, then choose it here. On a computer you can drop the file on this box.</p></div>
     ${lastImport ? importSummary() : ''}</section>`;
-  h += `<section class="card"><div class="card-head"><div><h2>Months loaded</h2><p class="sub">${ms.length ? `${ms.length} month${ms.length > 1 ? 's' : ''}, ${mLabel(M.months[0])} to ${mLabel(M.months[M.months.length - 1])}` : 'Nothing imported yet'}${isDemo() ? ' · demo data' : ''}</p></div>${ms.length ? '<button class="btn sm danger" id="clearAll">Remove all data</button>' : ''}</div>
-    <div class="list">${ms.map(k => { const p = DB.periods[k], i = M.idx[k], c = M.metrics[i].check; const ok = c == null ? '<span class="pill">No net profit row</span>' : Math.abs(c) <= 1 ? '<span class="pill ok">✓ Ties to statement</span>' : `<span class="pill warn">Off by ${acc(c)}</span>`; const sch = (p.schedules || []).length; return `<div class="list-row"><div class="grow"><b>${mLabel(k)}</b> ${ok}<small>Sheet “${esc(p.sheet)}”${p.file ? ` · ${esc(p.file)}` : ''}${p.importedAt ? ` · imported ${new Date(p.importedAt).toLocaleDateString('en-MY')}` : ''} · ${sch} supporting schedule${sch === 1 ? '' : 's'}${(p.warnings || []).length ? ` · ${p.warnings.map(esc).join('; ')}` : ''}</small></div><button class="btn sm" data-del="${k}">Delete</button></div>`; }).join('')}</div></section>`;
+  const E = ents();
+  h += `<section class="card"><div class="card-head"><div><h2>Companies and months</h2><p class="sub">${E.length ? `${E.length} compan${E.length > 1 ? 'ies' : 'y'}${isDemo() ? ' · demo data' : ''}. Tap a name to rename it.` : 'Nothing imported yet'}</p></div>${E.length ? '<button class="btn sm danger" id="clearAll">Remove all data</button>' : ''}</div>
+    ${E.map(id => { const en = DB.entities[id], ms = Object.keys(en.periods).sort().reverse(); return `<details class="ent" ${E.length === 1 || id === UI.entity ? 'open' : ''}><summary><b>${esc(en.name)}</b> <span class="tile-s">· ${ms.length} month${ms.length === 1 ? '' : 's'}${ms.length ? `, ${mLabel(ms[ms.length - 1])} to ${mLabel(ms[0])}` : ''}</span></summary>
+      <div class="row" style="margin:10px 0 4px"><input class="txt" style="flex:1;min-width:160px" aria-label="Company name" data-rename="${id}" value="${esc(en.name)}"><button class="btn sm danger" data-delent="${id}">Delete company</button></div>
+      <div class="list">${ms.map(k => { const p = en.periods[k], c = periodCheck(p); const ok = c == null ? '<span class="pill">No net profit row</span>' : Math.abs(c) <= 1 ? '<span class="pill ok">✓ Ties to statement</span>' : `<span class="pill warn">Off by ${acc(c)}</span>`; const sch = (p.schedules || []).length; return `<div class="list-row"><div class="grow"><b>${mLabel(k)}</b> ${ok}<small>Sheet “${esc(p.sheet)}”${p.file ? ` · ${esc(p.file)}` : ''}${p.importedAt ? ` · imported ${new Date(p.importedAt).toLocaleDateString('en-MY')}` : ''} · ${sch} supporting schedule${sch === 1 ? '' : 's'}${(p.warnings || []).length ? ` · ${p.warnings.map(esc).join('; ')}` : ''}</small></div><button class="btn sm" data-del="${id}|${k}">Delete</button></div>`; }).join('')}</div></details>`; }).join('')}
+  </section>`;
   const sugg = M.months.length ? nameSuggestions() : [];
   const aliases = Object.entries(DB.aliases);
   h += `<section class="card"><div class="card-head"><div><h2>Line names</h2><p class="sub">When the accountant renames a line, merge the old and new names so the history stays together.</p></div></div>
@@ -1239,14 +1315,25 @@ function renderData(main) {
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files.length) importFiles([...e.dataTransfer.files]); });
   $$('[data-del]', main).forEach(b => (b.onclick = async () => {
-    if (b.dataset.armed) { delete DB.periods[b.dataset.del]; await save(); buildModel(); toast(`Deleted ${mLabel(b.dataset.del)}`); render(); }
+    if (b.dataset.armed) { const [id, m] = b.dataset.del.split('|'); delete DB.entities[id].periods[m]; await save(); buildModel(); toast(`Deleted ${mLabel(m)} from ${entName(id)}`); render(); }
     else { b.dataset.armed = '1'; b.textContent = 'Tap again to delete'; b.classList.add('danger'); }
   }));
   if ($('#clearAll')) $('#clearAll').onclick = async e => {
     const b = e.currentTarget;
-    if (b.dataset.armed) { DB.periods = {}; DB.notes = {}; DB.aliases = {}; await save(); buildModel(); lastImport = null; toast('All data removed'); render(); }
+    if (b.dataset.armed) { const st = DB.settings; DB = freshDB(); DB.settings = st; await save(); buildModel(); lastImport = null; toast('All data removed'); render(); }
     else { b.dataset.armed = '1'; b.textContent = 'Tap again to remove everything'; }
   };
+  $$('[data-delent]', main).forEach(b => (b.onclick = async () => {
+    const id = b.dataset.delent;
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = `Tap again to delete ${entName(id)}`; return; }
+    const nm = entName(id);
+    delete DB.entities[id]; DB.order = DB.order.filter(x => x !== id);
+    for (const k of Object.keys(DB.notes)) if (k.startsWith(id + '::')) delete DB.notes[k];
+    for (const k of Object.keys(DB.fileMap)) if (DB.fileMap[k] === id) delete DB.fileMap[k];
+    if (UI.entity === id) UI.entity = null;
+    await save(); buildModel(); toast(`Deleted ${nm}`); render();
+  }));
+  $$('[data-rename]', main).forEach(inp => (inp.onchange = async () => { const v = inp.value.trim(); if (!v) { inp.value = entName(inp.dataset.rename); return; } DB.entities[inp.dataset.rename].name = v; await save(); buildModel(); toast('Renamed'); render(); }));
   $$('[data-sugg]', main).forEach(b => (b.onclick = async () => { const s = sugg[+b.dataset.sugg]; DB.aliases[s.from] = s.to; await save(); buildModel(); toast(`Merged ${nice(s.from)} into ${nice(s.to)}`); render(); }));
   $$('[data-unalias]', main).forEach(b => (b.onclick = async () => { delete DB.aliases[b.dataset.unalias]; await save(); buildModel(); render(); }));
   if ($('#mGo')) $('#mGo').onclick = async () => {
@@ -1262,15 +1349,22 @@ function renderData(main) {
   $('#restoreBtn').onclick = () => $('#restoreInput').click();
 }
 function allItemOptions() { return TYPES.filter(t => M.order[t].length).map(t => `<optgroup label="${TYPE_LABEL[t]}">${M.order[t].map(k => `<option value="${esc(k)}">${esc(info(k).name)}</option>`).join('')}</optgroup>`).join(''); }
+function periodCheck(p) {
+  const t = { rev: 0, cogs: 0, oinc: 0, opex: 0 };
+  for (const s of p.sections) for (const i of s.items) t[TYPES.includes(s.type) ? s.type : 'opex'] += i.amount;
+  const np = t.rev - t.cogs + t.oinc - t.opex, rep = (p.reported || {}).np;
+  return rep == null ? null : rep - np;
+}
 function importSummary() {
   const r = lastImport.results;
-  return `<div class="list" style="margin-top:12px">${r.map(x => x.error
+  return `${lastImport.entity ? `<p class="help" style="margin-top:12px">Last import went to <b>${esc(entName(lastImport.entity))}</b></p>` : ''}<div class="list" style="margin-top:8px">${r.map(x => x.error
     ? `<div class="list-row"><div class="grow"><b>Sheet “${esc(x.sheet || '')}”</b> <span class="pill warn">Skipped</span><small>${esc(x.file)} · ${esc(x.error)}</small></div></div>`
     : `<div class="list-row"><div class="grow"><b>${mLabel(x.period)}</b> <span class="pill ${x.status === 'new' ? 'new' : ''}">${x.status === 'new' ? 'New' : 'Updated'}</span><small>Sheet “${esc(x.sheet)}” · ${x.sections.reduce((t, s) => t + s.items.length, 0)} lines · ${x.schedules.length} schedules</small></div></div>`).join('')}</div>`;
 }
 
 /* ---------------- import / export ---------------- */
-const isDemo = () => Object.values(DB.periods).some(p => p.demo);
+const isDemo = () => ents().some(id => DB.entities[id].demo);
+let pendingImport = null;
 async function importFiles(files) {
   if (!window.XLSX) { toast('The spreadsheet reader has not loaded. Open the app once with internet, then try again.', 5000); return; }
   const results = [];
@@ -1283,19 +1377,81 @@ async function importFiles(files) {
   }
   const ok = results.filter(r => !r.error);
   if (!ok.length) { lastImport = { results }; toast('No P&L months found in that file', 4000); UI.tab = 'data'; render(); return; }
-  if (isDemo()) { DB.periods = {}; DB.notes = {}; }
+  pendingImport = { results, ok, files: files.map(f => f.name) };
+  showImportSheet();
+}
+const fileKey = n => String(n).toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*/g, ' ').replace(/[^a-z]+/g, ' ').trim();
+const revOf = sections => sections.filter(s => s.type === 'rev').reduce((t, s) => t + s.items.reduce((u, i) => u + i.amount, 0), 0);
+function mismatch(id, ok) {
+  const e = DB.entities[id]; if (!e) return [];
+  return ok.filter(r => { const p = e.periods[r.period]; if (!p) return false; const a = revOf(p.sections), b = revOf(r.sections); return Math.abs(a - b) > Math.max(1, 0.01 * Math.abs(b)); })
+    .map(r => ({ m: r.period, stored: revOf(e.periods[r.period].sections), file: revOf(r.sections) }));
+}
+const overlap = (id, ok) => ok.filter(r => DB.entities[id] && DB.entities[id].periods[r.period]).length;
+function guessEntity(pi) {
+  const real = ents().filter(id => !DB.entities[id].demo);
+  if (!real.length) return 'new';
+  const mapped = DB.fileMap[fileKey(pi.files[0])];
+  if (real.includes(mapped) && !mismatch(mapped, pi.ok).length) return mapped;
+  const clean = real.find(id => overlap(id, pi.ok) && !mismatch(id, pi.ok).length);
+  if (clean) return clean;
+  if (real.every(id => overlap(id, pi.ok) && mismatch(id, pi.ok).length)) return 'new';
+  if (real.includes(UI.entity)) return UI.entity;
+  return real[0];
+}
+function showImportSheet() {
+  const pi = pendingImport, el = $('#sheet');
+  const real = ents().filter(id => !DB.entities[id].demo);
+  const guess = guessEntity(pi);
+  const months = [...new Set(pi.ok.map(r => r.period))].sort();
+  el.innerHTML = `<div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="impT">
+    <div><h2 id="impT">Which company is this file for?</h2><p class="sub">${esc(pi.files.join(', '))} · ${months.length} month${months.length > 1 ? 's' : ''}, ${esc(rangeLabel({ from: months[0], to: months[months.length - 1] }))}</p></div>
+    <div class="opts">${real.map(id => `<label class="opt"><input type="radio" name="impEnt" value="${id}" ${guess === id ? 'checked' : ''}><span><b>${esc(entName(id))}</b><small>${Object.keys(DB.entities[id].periods).length} months stored</small></span></label>`).join('')}
+      <label class="opt"><input type="radio" name="impEnt" value="new" ${guess === 'new' ? 'checked' : ''}><span><b>${real.length ? 'Another company' : 'Name this company'}</b><input type="text" class="txt" id="impNew" placeholder="Company name" autocomplete="off"></span></label></div>
+    <div id="impWarn" class="warnbox" hidden></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn" id="impCancel">Cancel</button><button class="btn primary" id="impGo">Import</button></div></div>`;
+  el.hidden = false;
+  const sel = () => { const r = el.querySelector('input[name="impEnt"]:checked'); return r ? r.value : 'new'; };
+  const upd = () => {
+    const id = sel(), w = $('#impWarn'), mm = id === 'new' ? [] : mismatch(id, pi.ok);
+    if (mm.length) { w.hidden = false; w.innerHTML = `<b>Check the company.</b> Revenue for ${mm.slice(0, 2).map(x => `${mLabel(x.m)} is RM ${acc(x.file)} in this file but RM ${acc(x.stored)} for ${esc(entName(id))}`).join('; ')}. If this file belongs to another company, pick that one. Importing replaces the stored months.`; }
+    else w.hidden = true;
+  };
+  el.querySelectorAll('input[name="impEnt"]').forEach(r => (r.onchange = upd));
+  $('#impNew').onfocus = () => { el.querySelector('input[value="new"]').checked = true; upd(); };
+  upd();
+  if (guess === 'new' && !real.length) setTimeout(() => $('#impNew').focus(), 50);
+  const close = () => { el.hidden = true; el.innerHTML = ''; pendingImport = null; };
+  $('#impCancel').onclick = close;
+  el.onclick = e => { if (e.target === el) close(); };
+  $('#impGo').onclick = async () => {
+    let id = sel();
+    if (isDemo()) { for (const d of ents().filter(x => DB.entities[x].demo)) { delete DB.entities[d]; for (const k of Object.keys(DB.notes)) if (k.startsWith(d + '::')) delete DB.notes[k]; } DB.order = DB.order.filter(x => DB.entities[x]); }
+    if (id === 'new' || !DB.entities[id]) {
+      const name = $('#impNew').value.trim() || `Company ${ents().length + 1}`;
+      id = 'e' + Date.now().toString(36);
+      DB.entities[id] = { name, periods: {} }; DB.order.push(id);
+    }
+    const pr = pi; close();
+    commitImport(id, pr);
+  };
+}
+async function commitImport(id, pi) {
+  const en = DB.entities[id];
   let added = 0, updated = 0;
-  for (const r of ok) {
-    r.status = DB.periods[r.period] ? 'updated' : 'new';
+  for (const r of pi.ok) {
+    r.status = en.periods[r.period] ? 'updated' : 'new';
     r.status === 'new' ? added++ : updated++;
-    DB.periods[r.period] = { period: r.period, sheet: r.sheet, file: r.file, importedAt: new Date().toISOString(), sections: r.sections, reported: r.reported, schedules: r.schedules, warnings: r.warnings };
+    en.periods[r.period] = { period: r.period, sheet: r.sheet, file: r.file, importedAt: new Date().toISOString(), sections: r.sections, reported: r.reported, schedules: r.schedules, warnings: r.warnings };
   }
+  for (const f of pi.files) DB.fileMap[fileKey(f)] = id;
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  UI.entity = id;
   await save();
   buildModel();
-  UI.end = ok.map(r => r.period).sort().pop();
-  lastImport = { results };
-  toast(`Imported ${ok.length} month${ok.length > 1 ? 's' : ''}: ${added} new, ${updated} updated`);
+  UI.end = pi.ok.map(r => r.period).sort().pop();
+  lastImport = { results: pi.results, entity: id };
+  toast(`${en.name}: ${added} new month${added === 1 ? '' : 's'}, ${updated} updated`);
   UI.tab = 'overview';
   render();
 }
@@ -1312,60 +1468,69 @@ async function exportBackup() {
 async function restoreBackup(file) {
   try {
     const d = JSON.parse(await file.text());
-    if (!d || typeof d.periods !== 'object') throw new Error();
-    DB = Object.assign({ v: 1, periods: {}, aliases: {}, notes: {}, settings: { fyStart: 1, decimals: false } }, d);
-    await save(); buildModel(); UI.end = null; toast(`Restored ${Object.keys(DB.periods).length} months`); render();
+    if (!d || (typeof d.periods !== 'object' && typeof d.entities !== 'object')) throw new Error();
+    DB = migrate(d); UI.entity = null;
+    await save(); buildModel(); UI.end = null; toast(`Restored ${ents().length} compan${ents().length === 1 ? 'y' : 'ies'}`); render();
   } catch (e) { toast('That file is not a P&L Lens backup'); }
 }
 
 /* ---------------- demo data (fictional) ---------------- */
 function loadDemo() {
-  let seed = 11;
+  const st = DB.settings; DB = freshDB(); DB.settings = st;
+  DB.entities.d1 = { name: 'Demo Fitness Sdn Bhd', periods: genDemo(11, 1), demo: true };
+  DB.entities.d2 = { name: 'Demo Physio Sdn Bhd', periods: genDemo(29, 0.42), demo: true };
+  DB.order = ['d1', 'd2'];
+  DB.notes = { 'd1::opex|MARKETING & EVENT EXPENSES@2026-03': 'Demo note: open day event and booth rental.' };
+  UI.entity = 'd1';
+  save(); buildModel(); UI.end = null; UI.tab = 'overview'; render();
+}
+function genDemo(seed0, scale) {
+  let seed = seed0;
+  const out = {};
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const r2 = v => Math.round(v * 100) / 100;
+  const r2 = v => Math.round(v * scale * 100) / 100;
   const months = monthsIn('2025-07', '2026-08');
   const coaches = 'ABCDEFGHIJKLMN'.split('').map(c => 'Coach ' + c);
   const coachBase = coaches.map(() => 3500 + rnd() * 4500);
   const staff = [['Front desk 1', 2600], ['Front desk 2', 2400], ['Operations lead', 4800], ['Admin executive', 3200], ['Sales executive', 3000], ['Physio', 4200], ['Head coach', 6500], ['Marketing executive', 3400]];
   const otNames = ['Coach A', 'Coach B', 'Coach C', 'Coach D', 'Coach E', 'Coach F', 'Coach G', 'Front desk 1', 'Front desk 2', 'Operations lead', 'Physio'];
-  DB.periods = {};
   months.forEach((k, t) => {
     const season = 1 + 0.07 * Math.sin(((t + 2) / 12) * 2 * Math.PI);
     const pk = r2(118000 * (1 + 0.012 * t) * season * (0.96 + 0.08 * rnd()));
     const active = Math.min(coaches.length, 9 + Math.floor(t / 3));
-    const coachRows = coaches.slice(0, active).map((n, i) => ({ name: n, v: Math.round(coachBase[i] * (0.8 + 0.4 * rnd()) / 5) * 5 }));
+    const coachRows = coaches.slice(0, active).map((n, i) => ({ name: n, v: Math.round(coachBase[i] * scale * (0.8 + 0.4 * rnd()) / 5) * 5 }));
     const coaching = coachRows.reduce((s, r) => s + r.v, 0);
     const otRows = otNames.filter(() => rnd() > 0.2).map(n => ({ name: n, v: r2(300 + rnd() * 3200) }));
     const ot = r2(otRows.reduce((s, r) => s + r.v, 0));
     const basicStaff = staff.filter((_, i) => i !== 7 || t >= 6);
-    const basic = basicStaff.reduce((s, r) => s + r[1], 0);
+    basicStaff.forEach(r => (r[2] = Math.round(r[1] * scale)));
+    const basic = basicStaff.reduce((s, r) => s + r[2], 0);
     const mkt = (k === '2025-12' || k === '2026-03') ? r2(5500 + rnd() * 2500) : r2(150 + rnd() * 500);
     const rev = [['SALES - PACKAGES', pk], ['SALES - MEMBERSHIP/REGISTER', r2(200 + rnd() * 400)], ['SALES - FOOD MEAL', r2(900 + rnd() * 1800)], ['SALES - PHYSIOTHERAPY', r2(800 + rnd() * 1600)], ['SALES - DISC / RTN', rnd() < 0.35 ? -r2(1500 + rnd() * 3500) : 0], ['OTHER INCOME - STONED FINANCIAL', r2(400 + rnd() * 600)]];
     const cogs = [['PURCHASES', r2(800 + rnd() * 4500)], ['PURCHASES - OT', ot], ['PURCHASES - COACHING FEE', coaching]];
     const oinc = [['BANK DIVIDEN', r2(10 + rnd() * 30)], ['DEBATE / CREDIT CARD', rnd() < 0.5 ? r2(rnd() * 40) : 0]];
-    const opex = [['ACCOUNTING FEE', 1000], ['AUDIT & TAX AGENT FEE', t % 6 === 2 ? 600 : 0], ['ADVERTISMENT', r2(3500 + rnd() * 2000)], ['BANK CHARGES', r2(15 + rnd() * 10)], ['E.P.F', r2(basic * 0.13)], ['EIS', r2(basic * 0.002)], ['HRDF', r2(basic * 0.01)], ['MEMBERSHIP FEE - HEALTHSTREAM', t >= 9 ? 4200 : 3600], ['MARKETING & EVENT EXPENSES', mkt], ['PETROL, TOLL & PARKING', r2(500 + rnd() * 900)], ['PRINTING & STATIONERY', r2(300 + rnd() * 600)], ['RENTAL FEE', 5000], ['SALARY & WAGES (BASIC)', basic], ['SOCSO', r2(basic * 0.0175)], ['STAFF WELFARE & AMENITIES', r2(500 + rnd() * 1800)], [t < 10 ? 'STAMPING & FILLING FEE' : 'STAMPING & FILLING', r2(150 + rnd() * 200)], ['TELEPHONE & FAX', r2(300 + rnd() * 500)], ['TRAINING FEE', rnd() < 0.4 ? r2(500 + rnd() * 3000) : 0], ['TRAVELLING EXPENSES', rnd() < 0.3 ? r2(1000 + rnd() * 3000) : 0], ['UPKEEP OF OFFICE/SHOP', r2(4000 + rnd() * 6000)], ['UPKEEP OF OFFICE EQUIPMENT', r2(800 + rnd() * 3500)], ['WATER & ELECTRICITY', r2(2600 + rnd() * 700)]];
+    const opex = [['ACCOUNTING FEE', r2(1000)], ['AUDIT & TAX AGENT FEE', t % 6 === 2 ? r2(600) : 0], ['ADVERTISMENT', r2(3500 + rnd() * 2000)], ['BANK CHARGES', r2(15 + rnd() * 10)], ['E.P.F', Math.round(basic * 13) / 100], ['EIS', Math.round(basic * 0.2) / 100], ['HRDF', Math.round(basic) / 100], ['MEMBERSHIP FEE - HEALTHSTREAM', r2(t >= 9 ? 4200 : 3600)], ['MARKETING & EVENT EXPENSES', mkt], ['PETROL, TOLL & PARKING', r2(500 + rnd() * 900)], ['PRINTING & STATIONERY', r2(300 + rnd() * 600)], ['RENTAL FEE', r2(5000)], ['SALARY & WAGES (BASIC)', basic], ['SOCSO', Math.round(basic * 1.75) / 100], ['STAFF WELFARE & AMENITIES', r2(500 + rnd() * 1800)], [t < 10 ? 'STAMPING & FILLING FEE' : 'STAMPING & FILLING', r2(150 + rnd() * 200)], ['TELEPHONE & FAX', r2(300 + rnd() * 500)], ['TRAINING FEE', rnd() < 0.4 ? r2(500 + rnd() * 3000) : 0], ['TRAVELLING EXPENSES', rnd() < 0.3 ? r2(1000 + rnd() * 3000) : 0], ['UPKEEP OF OFFICE/SHOP', r2(4000 + rnd() * 6000)], ['UPKEEP OF OFFICE EQUIPMENT', r2(800 + rnd() * 3500)], ['WATER & ELECTRICITY', r2(2600 + rnd() * 700)]];
     const sec = (name, type, arr) => ({ name, type, items: arr.map(([n, v]) => ({ raw: n, name: P.normName(n), detail: '', amount: v })), subtotal: null });
     const sections = [sec('SALES', 'rev', rev), sec('COST OF GOODS SOLD', 'cogs', cogs), sec('OTHER INCOMES', 'oinc', oinc), sec('EXPENSES', 'opex', opex)];
     const sum = arr => arr.reduce((s, x) => s + x[1], 0);
     const gp = sum(rev) - sum(cogs), np = gp + sum(oinc) - sum(opex);
     const prev = addM(k, -1), [py, pm] = ym(prev), lab = `${pm}/${String(py).slice(2)}`;
     const people = new Map();
-    basicStaff.forEach(([n, v]) => people.set(n, [v, 0]));
+    basicStaff.forEach(([n, , v]) => people.set(n, [v, 0]));
     coachRows.forEach(r => { const p = people.get(r.name) || [0, 0]; p[1] = r.v; people.set(r.name, p); });
     const tRows = [...people].map(([n, [b, c]]) => ({ name: n, values: [b, c, b + c] }));
-    DB.periods[k] = { period: k, sheet: `${ym(k)[1]}.${String(ym(k)[0]).slice(2)}`, file: 'Demo data', demo: true, importedAt: new Date().toISOString(), sections, reported: { gp, np }, warnings: [],
+    out[k] = { period: k, sheet: `${ym(k)[1]}.${String(ym(k)[0]).slice(2)}`, file: 'Demo data', demo: true, importedAt: new Date().toISOString(), sections, reported: { gp, np }, warnings: [],
       schedules: [
         { kind: 'single', title: 'PURCHASES - OT', period: lab, columns: ['AMOUNT'], rows: otRows.map(r => ({ name: r.name, values: [r.v] })), totals: [ot] },
         { kind: 'table', title: `NAME - ${lab}`, period: lab, columns: ['BASIC', 'COA. F.', 'TOTAL'], rows: tRows, totals: [basic, coaching, basic + coaching] }] };
   });
-  DB.notes = { 'opex|MARKETING & EVENT EXPENSES@2026-03': 'Demo note: open day event and booth rental.' };
-  save(); buildModel(); UI.end = null; UI.tab = 'overview'; render();
+  return out;
 }
 
 /* ---------------- boot ---------------- */
 async function boot() {
   const saved = await Store.get('db');
-  if (saved && saved.periods) DB = Object.assign(DB, saved, { settings: Object.assign({ fyStart: 1, decimals: false }, saved.settings || {}) });
+  if (saved) DB = migrate(saved);
   buildModel();
   const hash = location.hash.slice(1);
   if (['overview', 'pnl', 'drill', 'trends', 'data'].includes(hash)) UI.tab = hash;
@@ -1374,6 +1539,7 @@ async function boot() {
 }
 $$('#nav button').forEach(b => (b.onclick = () => setTab(b.dataset.tab)));
 $('#fileInput').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) importFiles(f); };
+$('#entSel').onchange = e => { UI.entity = e.target.value; buildModel(); render(); };
 $('#restoreInput').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) restoreBackup(f); };
 window.addEventListener('hashchange', () => { const t = location.hash.slice(1); if (t && t !== UI.tab && ['overview', 'pnl', 'drill', 'trends', 'data'].includes(t)) { UI.tab = t; render(); } });
 let rw = window.innerWidth;
