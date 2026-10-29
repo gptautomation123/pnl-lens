@@ -609,6 +609,7 @@ const METRICS = {
 };
 
 function canon(name) { let n = name, i = 0; while (DB.aliases[n] && i++ < 10) n = DB.aliases[n]; return n; }
+const looseKey = n => String(n).toUpperCase().replace(/&/g, ' AND ').replace(/[^A-Z0-9]/g, '');
 const personKey = s => String(s).toUpperCase().replace(/\s+/g, ' ').trim();
 
 function buildModel() {
@@ -622,14 +623,18 @@ function buildModel() {
   const values = months.map(() => ({}));
   const valuesE = {}; ids.forEach(id => (valuesE[id] = months.map(() => ({}))));
   const metrics = months.map(() => ({ rev: 0, cogs: 0, gp: 0, oinc: 0, opex: 0, np: 0 }));
+  const loose = new Map(); // punctuation/spacing-insensitive match -> canonical key
   for (let i = months.length - 1; i >= 0; i--) {
     for (const id of ids) {
       const p = per(id, months[i]); if (!p) continue;
       for (const s of p.sections) {
         const type = TYPES.includes(s.type) ? s.type : 'opex';
         for (const it of s.items) {
-          const name = canon(it.name);
-          const key = type + '|' + name;
+          let name = canon(it.name);
+          let key = type + '|' + name;
+          const lk = type + '|' + looseKey(name);
+          if (!items.has(key) && loose.has(lk)) { key = loose.get(lk); name = items.get(key).name; }
+          if (!loose.has(lk)) loose.set(lk, key);
           if (!items.has(key)) { items.set(key, { key, type, name, raws: new Set(), periods: new Set(), detail: '' }); order[type].push(key); }
           const o = items.get(key);
           o.raws.add(it.name); o.periods.add(months[i]);
